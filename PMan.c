@@ -21,6 +21,7 @@ void kill_process(char * pid);
 void stop_process(char * pid);
 void start_process(char * pid);
 void free_all_strings(char ** ptr);
+void find_and_print_process_info(pid_t target_pid);
 
 void *emalloc(int n) 
 {
@@ -40,6 +41,18 @@ typedef struct Proc
 	char ** cmd;
 	struct Proc * next;
 } Proc;
+
+typedef struct ProcInfo
+{
+	pid_t pid;
+	char * comm;
+	char * state;
+	int utime;
+	int stime;
+	int rss;
+	int voluntary_ctxt_switches;
+	int nonvoluntary_ctxt_switches;
+} ProcInfo;
 
 Proc * process_list;
 
@@ -218,31 +231,33 @@ int lsh_launch(char **args)
 int lsh_execute(char **args)
 {
   if (args[0] == NULL) {
-		printf("PMan:> Please enter a command\n");
+		printf("PMan:> command not found\n");
     return 1;
   }
-
 	else if (strcmp(args[0], "bg") == 0) {
 		// pass everything after bg
 		return lsh_launch(args + 1);
 	}
-
 	else if (strcmp(args[0], "bglist") == 0) {
 		
 	}
-
 	else if (strcmp(args[0], "bgkill") == 0) {
 		kill_process((args + 1)[0]);
 	}
-
 	else if (strcmp(args[0], "bgstop") == 0) {
 		stop_process((args + 1)[0]);
 	}
-
 	else if (strcmp(args[0], "bgstart") == 0) {
 		start_process((args + 1)[0]);
 	}
-
+	else if (strcmp(args[0], "pstat") == 0) {
+		pid_t pid_to_find = (pid_t) atoi(args[1]);
+		if (lookup_pid(process_list, pid_to_find)) {
+			find_and_print_process_info(pid_to_find);
+		} else {
+			printf("PMan:> Error: Process %d does not exist\n", pid_to_find);
+		}
+	}
 	else {
 		printf("PMan:> %s: command not found\n", args[0]);
 	}
@@ -260,6 +275,54 @@ void stop_process(char * pid) {
 
 void start_process(char * pid) {
 	kill((pid_t) atoi(pid), SIGCONT);
+}
+
+void find_and_print_process_info(pid_t target_pid) {
+	char path[40], line[100], *p;
+  FILE* statusf;
+
+  snprintf(path, 40, "/proc/%ld/status", (long) target_pid);
+
+  statusf = fopen(path, "r");
+  if(!statusf)
+  	return;
+ 	printf("PID: %d", (int) target_pid);
+
+  while(fgets(line, 100, statusf)) {
+		if(strncmp(line, "State:", 6) == 0) {
+			// Ignore "State:" and whitespace
+			p = line + 7;
+			while(isspace(*p)) ++p;
+
+			printf("State: %s", p);
+		}
+		
+		if(strncmp(line, "VmRSS:", 6) == 0) {
+			// Ignore "VmRSS:" and whitespace
+			p = line + 7;
+			while(isspace(*p)) ++p;
+
+			printf("RSS: %s", p);
+		}
+		
+		if(strncmp(line, "voluntary_ctxt_switches:", 24) == 0) {
+			// Ignore "voluntary_ctxt_switches:" and whitespace
+			p = line + 25;
+			while(isspace(*p)) ++p;
+
+			printf("voluntary_ctxt_switches: %s", p);
+		}
+		
+		if(strncmp(line, "nonvoluntary_ctxt_switches:", 27) == 0) {
+			// Ignore "nonvoluntary_ctxt_switches:" and whitespace
+			p = line + 28;
+			while(isspace(*p)) ++p;
+
+			printf("voluntary_ctxt_switches: %s", p);
+		}
+  }
+
+  fclose(statusf);
 }
 
 
