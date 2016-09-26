@@ -20,7 +20,6 @@ int lsh_execute(char **args);
 void kill_process(char * pid);
 void stop_process(char * pid);
 void start_process(char * pid);
-void free_all_strings(char ** ptr);
 void find_and_print_process_info(pid_t target_pid);
 
 void *emalloc(int n) 
@@ -116,12 +115,14 @@ int lookup_pid(Proc *listp, pid_t pid) {
 
 void print_all(Proc *listp)
 {
+	int i = 0;
  	Proc *next;
  	while (listp != NULL) {
- 		printf("%d ", (int) listp->pid);
+ 		printf("%d: \n", (int) listp->pid);
 		listp = listp->next;
+		i++;
  	}
-	printf("\n");
+	printf("Total background jobs: %d\n", i);
 }
 
 void free_all(Proc *listp)
@@ -131,15 +132,6 @@ void free_all(Proc *listp)
  		next = listp->next;
  		free(listp);
  	}
-}
-
-void free_all_strings(char ** ptr) {
-	int i = 0;
-	while (!(ptr[i] == NULL)) {
-		free(ptr[i]);
-		i++;
-	}
-	free(ptr);
 }
 
 int main (int argc, char **argv) {
@@ -155,7 +147,6 @@ void lsh_loop()
   int status;
 	
   do {
-		print_all(process_list);
     line = lsh_read_line();
     args = lsh_split_line(line);
     status = lsh_execute(args);
@@ -239,7 +230,7 @@ int lsh_execute(char **args)
 		return lsh_launch(args + 1);
 	}
 	else if (strcmp(args[0], "bglist") == 0) {
-		
+		print_all(process_list);
 	}
 	else if (strcmp(args[0], "bgkill") == 0) {
 		kill_process((args + 1)[0]);
@@ -252,11 +243,8 @@ int lsh_execute(char **args)
 	}
 	else if (strcmp(args[0], "pstat") == 0) {
 		pid_t pid_to_find = (pid_t) atoi(args[1]);
-		if (lookup_pid(process_list, pid_to_find)) {
-			find_and_print_process_info(pid_to_find);
-		} else {
-			printf("PMan:> Error: Process %d does not exist\n", pid_to_find);
-		}
+		if (lookup_pid(process_list, pid_to_find)) find_and_print_process_info(pid_to_find);
+		else printf("PMan:> Error: Process %d does not exist\n", pid_to_find);
 	}
 	else {
 		printf("PMan:> %s: command not found\n", args[0]);
@@ -266,15 +254,21 @@ int lsh_execute(char **args)
 }
 
 void kill_process(char * pid) {
-	kill((pid_t) atoi(pid), SIGTERM);
+	pid_t pid_to_find = (pid_t) atoi(pid);
+	if (lookup_pid(process_list, pid_to_find)) kill(pid_to_find, SIGTERM);
+	else printf("PMan:> Error: Process %d does not exist\n", pid_to_find);
 }
 
 void stop_process(char * pid) {
-	kill((pid_t) atoi(pid), SIGSTOP);
+	pid_t pid_to_find = (pid_t) atoi(pid);
+	if (lookup_pid(process_list, pid_to_find)) kill((pid_t) atoi(pid), SIGSTOP);
+	else printf("PMan:> Error: Process %d does not exist\n", pid_to_find);
 }
 
 void start_process(char * pid) {
-	kill((pid_t) atoi(pid), SIGCONT);
+	pid_t pid_to_find = (pid_t) atoi(pid);
+	if (lookup_pid(process_list, pid_to_find)) kill((pid_t) atoi(pid), SIGCONT);
+	else printf("PMan:> Error: Process %d does not exist\n", pid_to_find);
 }
 
 void find_and_print_process_info(pid_t target_pid) {
@@ -294,7 +288,7 @@ void find_and_print_process_info(pid_t target_pid) {
 			p = line + 7;
 			while(isspace(*p)) ++p;
 
-			printf("State: %s", p);
+			printf("state: %s", p);
 		}
 		
 		if(strncmp(line, "VmRSS:", 6) == 0) {
@@ -302,7 +296,7 @@ void find_and_print_process_info(pid_t target_pid) {
 			p = line + 7;
 			while(isspace(*p)) ++p;
 
-			printf("RSS: %s", p);
+			printf("rss: %s", p);
 		}
 		
 		if(strncmp(line, "voluntary_ctxt_switches:", 24) == 0) {
@@ -324,7 +318,6 @@ void find_and_print_process_info(pid_t target_pid) {
 
   fclose(statusf);
 }
-
 
 
 
