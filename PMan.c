@@ -20,6 +20,7 @@ int lsh_execute(char **args);
 void kill_process(char * pid);
 void stop_process(char * pid);
 void start_process(char * pid);
+void free_all_strings(char ** ptr);
 
 void *emalloc(int n) 
 {
@@ -40,25 +41,26 @@ typedef struct Proc
 	struct Proc * next;
 } Proc;
 
-Proc *newitem (pid_t pid, char ** cmd)
+Proc * process_list;
+
+Proc *new_item (pid_t pid, char ** cmd)
 {
  	Proc *newp;
  	newp = (Proc *) emalloc(sizeof(Proc));
  	newp->pid = pid;
-	newp->cmd = cmd;
+	//newp->cmd = cmd;
  	newp->next = NULL;
  	return newp;
 }
 
-Proc *addfront(Proc *listp, Proc *newp)
+Proc *add_front(Proc *listp, Proc *newp)
 {
  	newp->next = listp;
  	return newp;
 }
 
-Proc *delitem (Proc *listp, pid_t pid, int * position)
+Proc *delete_item (Proc *listp, pid_t pid)
 {
-	*position = 0;
  	Proc *curr, *prev;
  	prev = NULL;
 	
@@ -66,23 +68,23 @@ Proc *delitem (Proc *listp, pid_t pid, int * position)
 	{
  		if (pid == curr->pid)
 		{
- 			if (prev == NULL)
+ 			if (curr->next == NULL && prev == NULL)
 			{
- 				listp = curr->next;
+	 			free(curr);
+	 			return NULL;
  			}
+			else if (prev == NULL) 
+			{
+				listp = curr->next;
+			}
 			else
 			{
  				prev->next = curr->next;
  			}
-			if(curr->cmd != NULL)
-			{
-				free(curr->cmd);
-			}
  			free(curr);
  			return listp;
  		}
  		prev = curr;
-		*position = *position + 1;
  	}
  	return NULL;
 }
@@ -99,17 +101,36 @@ int lookup_pid(Proc *listp, pid_t pid) {
  	return 0;
 }
 
-void freeall(Proc *listp)
+void print_all(Proc *listp)
+{
+ 	Proc *next;
+ 	while (listp != NULL) {
+ 		printf("%d ", (int) listp->pid);
+		listp = listp->next;
+ 	}
+	printf("\n");
+}
+
+void free_all(Proc *listp)
 {
  	Proc *next;
  	for ( ; listp != NULL; listp = next ) {
  		next = listp->next;
- 		free(listp->cmd);
  		free(listp);
  	}
 }
 
+void free_all_strings(char ** ptr) {
+	int i = 0;
+	while (!(ptr[i] == NULL)) {
+		free(ptr[i]);
+		i++;
+	}
+	free(ptr);
+}
+
 int main (int argc, char **argv) {
+	process_list = NULL;
 	lsh_loop();
 	return (0);
 }
@@ -121,6 +142,7 @@ void lsh_loop()
   int status;
 	
   do {
+		print_all(process_list);
     line = lsh_read_line();
     args = lsh_split_line(line);
     status = lsh_execute(args);
@@ -183,7 +205,12 @@ int lsh_launch(char **args)
     exit(EXIT_FAILURE);
   } else {
 		// Parent process
-		
+		Proc * new = new_item(pid, args); 
+		process_list = add_front(process_list, new);
+		do {
+      wpid = waitpid(pid, &status, WNOHANG);
+    } while (!WIFEXITED(status) && !WIFSIGNALED(status));
+		//process_list = delete_item(process_list, pid);
 	}
   return 1;
 }
