@@ -293,9 +293,17 @@ void find_and_print_process_info(pid_t target_pid) {
   statusf = fopen(path, "r");
   if(!statusf)
   	return;
- 	printf("PID: %d", (int) target_pid);
+ 	printf("PID: %d\n", (int) target_pid);
 
   while(fgets(line, 100, statusf)) {
+  	if(strncmp(line, "Name:", 5) == 0) {
+			// Ignore "Name:" and whitespace
+			p = line + 6;
+			while(isspace(*p)) ++p;
+
+			printf("comm: %s", p);
+		}
+
 		if(strncmp(line, "State:", 6) == 0) {
 			// Ignore "State:" and whitespace
 			p = line + 7;
