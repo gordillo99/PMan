@@ -14,14 +14,15 @@
 
 char * lsh_read_line();
 void lsh_loop();
-char **lsh_split_line(char *line);
-int lsh_launch(char **args);
-int lsh_execute(char **args);
+char **lsh_split_line(char * line);
+int lsh_launch(char ** args, char * line);
+int lsh_execute(char ** args, char * line);
 void kill_process(char * pid);
 void stop_process(char * pid);
 void start_process(char * pid);
 void find_and_print_process_info(pid_t target_pid);
 void get_updated_state(pid_t target_pid, char ** state);
+void update_bg_procss();
 
 void *emalloc(int n) 
 {
@@ -39,30 +40,23 @@ typedef struct Proc
 {
 	pid_t pid;
 	char * state;
+	int isStop;
+	char * cmd;
 	struct Proc * next;
 } Proc;
 
-typedef struct ProcInfo
-{
-	pid_t pid;
-	char * comm;
-	char * state;
-	int utime;
-	int stime;
-	int rss;
-	int voluntary_ctxt_switches;
-	int nonvoluntary_ctxt_switches;
-} ProcInfo;
-
 Proc * process_list;
 
-Proc *new_item (pid_t pid)
+Proc *new_item (pid_t pid, char * line)
 {
  	Proc *newp;
  	newp = (Proc *) emalloc(sizeof(Proc));
  	newp->pid = pid;
  	newp->state = NULL;
+ 	newp->isStop = 0;
  	newp->next = NULL;
+ 	newp->cmd = (char*) malloc(strlen(line)*sizeof(char));
+ 	strcpy(newp->cmd, line);
  	return newp;
 }
 
@@ -72,7 +66,7 @@ Proc *add_front(Proc *listp, Proc *newp)
  	return newp;
 }
 
-Proc *update_process_list (Proc *listp)
+Proc *delete_item (Proc *listp, pid_t pid)
 {
  	Proc *curr, *prev, *head;
  	head = listp;
@@ -80,12 +74,11 @@ Proc *update_process_list (Proc *listp)
 	
  	for (curr = listp; curr != NULL; curr = curr-> next) 
 	{
-		get_updated_state(curr->pid, &(curr->state));
- 		if (!(*(curr->state) == 'S' || *(curr->state) == 'R'))
+ 		if (pid == curr->pid)
 		{
  			if (curr->next == NULL && prev == NULL)
 			{
-				if (curr->state != NULL) free(curr->state); 
+				if (curr->cmd !=NULL) free(curr->cmd);
 	 			free(curr);
 	 			return NULL;
  			}
@@ -97,12 +90,26 @@ Proc *update_process_list (Proc *listp)
 			{
  				prev->next = curr->next;
  			}
- 			if (curr->state != NULL) free(curr->state); 
+ 			
+ 			if (curr->cmd !=NULL) free(curr->cmd);
  			free(curr);
+ 			return head;
  		}
  		prev = curr;
  	}
  	return head;
+}
+
+void update_isStop(Proc *listp, pid_t pid, int val) {
+	Proc * tmp = listp;
+ 	for (; tmp != NULL; tmp = tmp->next)
+	{
+ 		if (pid == tmp->pid)
+		{
+ 			tmp->isStop = val;
+ 			break;
+ 		}
+ 	}
 }
 
 int lookup_pid(Proc *listp, pid_t pid) {
@@ -122,11 +129,13 @@ void print_all(Proc *listp)
 	int i = 0;
  	Proc *next;
  	while (listp != NULL) {
- 		printf("%d: \n", (int) listp->pid);
+ 		if (!listp->isStop) {
+ 			printf("PMan:> %d: %s\n", (int) listp->pid, listp->cmd);
+			i++;
+ 		}
 		listp = listp->next;
-		i++;
  	}
-	printf("Total background jobs: %d\n", i);
+	printf("PMan:> Total background jobs: %d\n", i);
 }
 
 void free_all(Proc *listp)
@@ -147,13 +156,15 @@ int main (int argc, char **argv) {
 void lsh_loop()
 {
   char *line;
+  char line_copy[100];
   char **args;
   int status;
 	
   do {
     line = lsh_read_line();
+    strcpy(line_copy, line);
     args = lsh_split_line(line);
-    status = lsh_execute(args);
+    status = lsh_execute(args, line_copy);
 
     free(line);
     free(args);
@@ -199,7 +210,7 @@ char **lsh_split_line(char *line)
   return tokens;
 }
 
-int lsh_launch(char **args)
+int lsh_launch(char **args, char * line)
 {
   pid_t pid, wpid;
   int status;
@@ -213,18 +224,15 @@ int lsh_launch(char **args)
     exit(EXIT_FAILURE);
   } else {
 		// Parent process
-		Proc * new = new_item(pid); 
+		Proc * new = new_item(pid, line); 
 		process_list = add_front(process_list, new);
-		do {
-      wpid = waitpid(pid, &status, WNOHANG);
-    } while (!WIFEXITED(status) && !WIFSIGNALED(status));
 	}
   return 1;
 }
 
-int lsh_execute(char **args)
+int lsh_execute(char **args, char * line)
 {
-	process_list = update_process_list(process_list);
+	update_bg_procss();
 	
   if (args[0] == NULL) {
 		printf("PMan:> command not found\n");
@@ -232,7 +240,7 @@ int lsh_execute(char **args)
   }
 	else if (strcmp(args[0], "bg") == 0) {
 		// pass everything after bg
-		return lsh_launch(args + 1);
+		return lsh_launch(args + 1, line);
 	}
 	else if (strcmp(args[0], "bglist") == 0) {
 		print_all(process_list);
@@ -324,34 +332,28 @@ void find_and_print_process_info(pid_t target_pid) {
   fclose(statusf);
 }
 
-void get_updated_state(pid_t target_pid, char ** state) {
-	char path[40], line[100], *p, *temp_ptr;
-  FILE* statusf;
-  int i = 0;
+void update_bg_procss() {
 
-  snprintf(path, 40, "/proc/%ld/status", (long) target_pid);
+  int status = 0;
+  int id = 0;
 
-  statusf = fopen(path, "r");
-  if(!statusf) {
-  	state = NULL;
-  	return;
-  }
-
- 	while(fgets(line, 100, statusf)) {
-		if(strncmp(line, "State:", 6) == 0) {
-			p = line + 7;
-			while(isspace(*p)) ++p;
-			temp_ptr = p;
-			while(*temp_ptr != '\n') ++temp_ptr;
-			if (*state != NULL) free(*state);
-			*state = (char*) emalloc(2 * sizeof(char));
-			**state = *p;
-			*(*state + 1) = '\0';
+  while(1) {
+		id = waitpid(-1, &status, WNOHANG | WUNTRACED | WCONTINUED);
+		if (id > 0) {
+			if (WIFSIGNALED(status) || WIFEXITED(status)) {
+		  	process_list = delete_item (process_list, id);
+		  }
+		  if (WIFSTOPPED(status)) {
+		  	update_isStop(process_list, id, 1);
+		  }
+		  if (WIFCONTINUED(status)) {
+		  	update_isStop(process_list, id, 0);
+			}
+		} else {
 			break;
 		}
   }
-
-  fclose(statusf);
+  return;
 }
 
 
