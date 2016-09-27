@@ -21,6 +21,7 @@ void kill_process(char * pid);
 void stop_process(char * pid);
 void start_process(char * pid);
 void find_and_print_process_info(pid_t target_pid);
+void get_updated_state(pid_t target_pid, char ** state);
 
 void *emalloc(int n) 
 {
@@ -37,7 +38,7 @@ void *emalloc(int n)
 typedef struct Proc
 {
 	pid_t pid;
-	char ** cmd;
+	char * state;
 	struct Proc * next;
 } Proc;
 
@@ -55,12 +56,12 @@ typedef struct ProcInfo
 
 Proc * process_list;
 
-Proc *new_item (pid_t pid, char ** cmd)
+Proc *new_item (pid_t pid)
 {
  	Proc *newp;
  	newp = (Proc *) emalloc(sizeof(Proc));
  	newp->pid = pid;
-	//newp->cmd = cmd;
+ 	newp->state = NULL;
  	newp->next = NULL;
  	return newp;
 }
@@ -71,17 +72,20 @@ Proc *add_front(Proc *listp, Proc *newp)
  	return newp;
 }
 
-Proc *delete_item (Proc *listp, pid_t pid)
+Proc *update_process_list (Proc *listp)
 {
- 	Proc *curr, *prev;
+ 	Proc *curr, *prev, *head;
+ 	head = listp;
  	prev = NULL;
 	
  	for (curr = listp; curr != NULL; curr = curr-> next) 
 	{
- 		if (pid == curr->pid)
+		get_updated_state(curr->pid, &(curr->state));
+ 		if (!(*(curr->state) == 'S' || *(curr->state) == 'R'))
 		{
  			if (curr->next == NULL && prev == NULL)
 			{
+				if (curr->state != NULL) free(curr->state); 
 	 			free(curr);
 	 			return NULL;
  			}
@@ -93,12 +97,12 @@ Proc *delete_item (Proc *listp, pid_t pid)
 			{
  				prev->next = curr->next;
  			}
+ 			if (curr->state != NULL) free(curr->state); 
  			free(curr);
- 			return listp;
  		}
  		prev = curr;
  	}
- 	return NULL;
+ 	return head;
 }
 
 int lookup_pid(Proc *listp, pid_t pid) {
@@ -209,18 +213,19 @@ int lsh_launch(char **args)
     exit(EXIT_FAILURE);
   } else {
 		// Parent process
-		Proc * new = new_item(pid, args); 
+		Proc * new = new_item(pid); 
 		process_list = add_front(process_list, new);
 		do {
       wpid = waitpid(pid, &status, WNOHANG);
     } while (!WIFEXITED(status) && !WIFSIGNALED(status));
-		//process_list = delete_item(process_list, pid);
 	}
   return 1;
 }
 
 int lsh_execute(char **args)
 {
+	process_list = update_process_list(process_list);
+	
   if (args[0] == NULL) {
 		printf("PMan:> command not found\n");
     return 1;
@@ -318,6 +323,38 @@ void find_and_print_process_info(pid_t target_pid) {
 
   fclose(statusf);
 }
+
+void get_updated_state(pid_t target_pid, char ** state) {
+	char path[40], line[100], *p, *temp_ptr;
+  FILE* statusf;
+  int i = 0;
+
+  snprintf(path, 40, "/proc/%ld/status", (long) target_pid);
+
+  statusf = fopen(path, "r");
+  if(!statusf) {
+  	state = NULL;
+  	return;
+  }
+
+ 	while(fgets(line, 100, statusf)) {
+		if(strncmp(line, "State:", 6) == 0) {
+			p = line + 7;
+			while(isspace(*p)) ++p;
+			temp_ptr = p;
+			while(*temp_ptr != '\n') ++temp_ptr;
+			if (*state != NULL) free(*state);
+			*state = (char*) emalloc(2 * sizeof(char));
+			**state = *p;
+			*(*state + 1) = '\0';
+			break;
+		}
+  }
+
+  fclose(statusf);
+}
+
+
 
 
 
