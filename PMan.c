@@ -9,17 +9,16 @@
 #include <errno.h>     
 
 #define MAX_LINE_LEN 256
-#define LSH_TOK_BUFSIZE 64
-#define LSH_TOK_DELIM " \t\r\n\a"
+#define MAX_PATH_LEN 40
+#define TOK_BUFSIZE 64
+#define TOK_DELIM " \t\r\n\a"
 
-char * lsh_read_line();
-void lsh_loop();
-char **lsh_split_line(char * line);
-int lsh_launch(char ** args, char * line);
-int lsh_execute(char ** args, char * line);
-void kill_process(char * pid);
-void stop_process(char * pid);
-void start_process(char * pid);
+char * prompt_user();
+void main_loop();
+char **parse_user_input(char * line);
+int execute_process(char ** args, char * line);
+int handle_user_input(char ** args, char * line);
+void change_process_status(char * pid, int option);
 void find_and_print_process_info(pid_t target_pid);
 void get_updated_state(pid_t target_pid, char ** state);
 void update_bg_procss();
@@ -30,8 +29,8 @@ void *emalloc(int n)
  	p = malloc(n);
  	if (p == NULL)
 	{
-	 	fprintf(stderr, "malloc of %u bytes failed", n);
- 		exit(1);
+	 	perror("command malloc failed\n");
+		exit(EXIT_FAILURE);
  	}
  	return p;
 }
@@ -55,7 +54,7 @@ Proc *new_item (pid_t pid, char * line)
  	newp->state = NULL;
  	newp->isStop = 0;
  	newp->next = NULL;
- 	newp->cmd = (char*) malloc(strlen(line)*sizeof(char));
+ 	newp->cmd = (char*) emalloc(strlen(line)*sizeof(char));
  	strcpy(newp->cmd, line);
  	return newp;
 }
@@ -72,26 +71,20 @@ Proc *delete_item (Proc *listp, pid_t pid)
  	head = listp;
  	prev = NULL;
 	
- 	for (curr = listp; curr != NULL; curr = curr-> next) 
+ 	for (curr = listp; curr != NULL; curr = curr->next) 
 	{
  		if (pid == curr->pid)
 		{
  			if (curr->next == NULL && prev == NULL)
 			{
-				if (curr->cmd !=NULL) free(curr->cmd);
+				if (curr->cmd != NULL) free(curr->cmd);
 	 			free(curr);
 	 			return NULL;
  			}
-			else if (prev == NULL) 
-			{
-				listp = curr->next;
-			}
-			else
-			{
- 				prev->next = curr->next;
- 			}
+			else if (prev == NULL) listp = curr->next;
+			else prev->next = curr->next;
  			
- 			if (curr->cmd !=NULL) free(curr->cmd);
+ 			if (curr->cmd != NULL) free(curr->cmd);
  			free(curr);
  			return head;
  		}
@@ -114,13 +107,7 @@ void update_isStop(Proc *listp, pid_t pid, int val) {
 
 int lookup_pid(Proc *listp, pid_t pid) {
 	Proc * tmp = listp;
- 	for (; tmp != NULL; tmp = tmp->next)
-	{
- 		if (pid == tmp->pid)
-		{
- 			return 1;
- 		}
- 	}
+ 	for (; tmp != NULL; tmp = tmp->next) if (pid == tmp->pid) return 1;
  	return 0;
 }
 
@@ -143,35 +130,37 @@ void free_all(Proc *listp)
  	Proc *next;
  	for ( ; listp != NULL; listp = next ) {
  		next = listp->next;
+		if (listp->cmd != NULL) free(listp->cmd);
  		free(listp);
  	}
 }
 
 int main (int argc, char **argv) {
 	process_list = NULL;
-	lsh_loop();
+	main_loop();
 	return (0);
 }
 
-void lsh_loop()
+void main_loop()
 {
-  char *line;
-  char line_copy[100];
+  char *user_input;
+  char line_copy[MAX_LINE_LEN];
   char **args;
-  int status;
+  int status = 1;
 	
-  do {
-    line = lsh_read_line();
-    strcpy(line_copy, line);
-    args = lsh_split_line(line);
-    status = lsh_execute(args, line_copy);
-
-    free(line);
-    free(args);
-  } while (status);
+  while (status) {
+    user_input = prompt_user();
+    strcpy(line_copy, user_input);
+    args = parse_user_input(user_input);
+    status = handle_user_input(args, line_copy);
+		free(args);
+    free(user_input);  
+  }
+	free_all(process_list);
+	printf("Goodbye!\n");
 }
 
-char * lsh_read_line() {
+char * prompt_user() {
 	char *input = NULL ;
   char *prompt = "PMan:> ";
   input = readline(prompt);
@@ -179,38 +168,33 @@ char * lsh_read_line() {
   return input;
 }
 
-char **lsh_split_line(char *line)
+char **parse_user_input(char *line)
 {
-  int bufsize = LSH_TOK_BUFSIZE, position = 0;
+  int bufsize = TOK_BUFSIZE, position = 0;
   char **tokens = emalloc(bufsize * sizeof(char*));
   char *token;
 
-  if (!tokens) {
-    fprintf(stderr, "lsh: allocation error\n");
-    exit(EXIT_FAILURE);
-  }
-
-  token = strtok(line, LSH_TOK_DELIM);
+  token = strtok(line, TOK_DELIM);
   while (token != NULL) {
     tokens[position] = token;
     position++;
 
     if (position >= bufsize) {
-      bufsize += LSH_TOK_BUFSIZE;
+      bufsize += TOK_BUFSIZE;
       tokens = realloc(tokens, bufsize * sizeof(char*));
       if (!tokens) {
-        fprintf(stderr, "lsh: allocation error\n");
+        perror("realloc command failed\n");
         exit(EXIT_FAILURE);
       }
     }
 
-    token = strtok(NULL, LSH_TOK_DELIM);
+    token = strtok(NULL, TOK_DELIM);
   }
   tokens[position] = NULL;
   return tokens;
 }
 
-int lsh_launch(char **args, char * line)
+int execute_process(char **args, char * line)
 {
   pid_t pid, wpid;
   int status;
@@ -219,45 +203,50 @@ int lsh_launch(char **args, char * line)
   if (pid == 0) {
     // Child process
     if (execvp(args[0], args) == -1) {
-      perror("lsh");
+      perror("execvp command failed\n");
+			exit(EXIT_FAILURE);
     }
     exit(EXIT_FAILURE);
-  } else {
+  } else if (pid > 0) {
 		// Parent process
 		Proc * new = new_item(pid, line); 
 		process_list = add_front(process_list, new);
+	} else {
+		perror("fork command failed\n");
+		exit(EXIT_FAILURE);
 	}
   return 1;
 }
 
-int lsh_execute(char **args, char * line)
+int handle_user_input(char **args, char * line)
 {
 	update_bg_procss();
 	
-  if (args[0] == NULL) {
-		printf("PMan:> command not found\n");
+  if (args[0] == NULL) { // if user presses enter with no commands, return
     return 1;
   }
 	else if (strcmp(args[0], "bg") == 0) {
-		// pass everything after bg
-		return lsh_launch(args + 1, line);
+		return execute_process(args + 1, line); // pass everything after bg
 	}
 	else if (strcmp(args[0], "bglist") == 0) {
 		print_all(process_list);
 	}
 	else if (strcmp(args[0], "bgkill") == 0) {
-		kill_process((args + 1)[0]);
+		change_process_status((args + 1)[0], 0);
 	}
 	else if (strcmp(args[0], "bgstop") == 0) {
-		stop_process((args + 1)[0]);
+		change_process_status((args + 1)[0], 1);
 	}
 	else if (strcmp(args[0], "bgstart") == 0) {
-		start_process((args + 1)[0]);
+		change_process_status((args + 1)[0], 2);
 	}
 	else if (strcmp(args[0], "pstat") == 0) {
 		pid_t pid_to_find = (pid_t) atoi(args[1]);
 		if (lookup_pid(process_list, pid_to_find)) find_and_print_process_info(pid_to_find);
 		else printf("PMan:> Error: Process %d does not exist\n", pid_to_find);
+	}
+  else if (strcmp(args[0], "exit") == 0) { // if user enters exit, return and break main_loop
+		return 0;
 	}
 	else {
 		printf("PMan:> %s: command not found\n", args[0]);
@@ -266,78 +255,82 @@ int lsh_execute(char **args, char * line)
   return 1;
 }
 
-void kill_process(char * pid) {
+void change_process_status(char * pid, int option) {
 	pid_t pid_to_find = (pid_t) atoi(pid);
-	if (lookup_pid(process_list, pid_to_find)) kill(pid_to_find, SIGTERM);
-	else printf("PMan:> Error: Process %d does not exist\n", pid_to_find);
-}
+	int status;
+	if (!lookup_pid(process_list, pid_to_find)) {
+		printf("PMan:> Error: Process %d does not exist\n", pid_to_find);
+		return;
+	}
 
-void stop_process(char * pid) {
-	pid_t pid_to_find = (pid_t) atoi(pid);
-	if (lookup_pid(process_list, pid_to_find)) kill((pid_t) atoi(pid), SIGSTOP);
-	else printf("PMan:> Error: Process %d does not exist\n", pid_to_find);
-}
+	if (option == 0) {
+		status = kill(pid_to_find, SIGTERM);
+	} else if (option == 1) {
+		status = kill(pid_to_find, SIGSTOP);
+	} else {
+		status = kill(pid_to_find, SIGCONT);
+	}
 
-void start_process(char * pid) {
-	pid_t pid_to_find = (pid_t) atoi(pid);
-	if (lookup_pid(process_list, pid_to_find)) kill((pid_t) atoi(pid), SIGCONT);
-	else printf("PMan:> Error: Process %d does not exist\n", pid_to_find);
+	if (status < 0) printf("kill command failed\n");
 }
 
 void find_and_print_process_info(pid_t target_pid) {
-	char path[40], line[100], *p;
-  FILE* statusf;
+	char path[MAX_PATH_LEN], line[MAX_LINE_LEN], *text;
+  FILE* status_file;
 
-  snprintf(path, 40, "/proc/%ld/status", (long) target_pid);
+  snprintf(path, MAX_PATH_LEN, "/proc/%d/status", (int) target_pid);
 
-  statusf = fopen(path, "r");
-  if(!statusf)
-  	return;
+  status_file = fopen(path, "r");
+  if(!status_file) {
+		perror("Could not open status file.\n");
+		return;
+	}
+
  	printf("PID: %d\n", (int) target_pid);
 
-  while(fgets(line, 100, statusf)) {
+  while(fgets(line, 100, status_file)) {
   	if(strncmp(line, "Name:", 5) == 0) {
 			// Ignore "Name:" and whitespace
-			p = line + 6;
-			while(isspace(*p)) ++p;
+			text = line + 6;
+			while(isspace(*text)) ++text;
 
-			printf("comm: %s", p);
+			printf("comm: %s", text);
 		}
 
 		if(strncmp(line, "State:", 6) == 0) {
 			// Ignore "State:" and whitespace
-			p = line + 7;
-			while(isspace(*p)) ++p;
+			text = line + 7;
+			while(isspace(*text)) ++text;
 
-			printf("state: %s", p);
+			printf("state: %s", text);
 		}
 		
 		if(strncmp(line, "VmRSS:", 6) == 0) {
 			// Ignore "VmRSS:" and whitespace
-			p = line + 7;
-			while(isspace(*p)) ++p;
+			text = line + 7;
+			while(isspace(*text)) ++text;
 
-			printf("rss: %s", p);
+			printf("rss: %s", text);
 		}
 		
 		if(strncmp(line, "voluntary_ctxt_switches:", 24) == 0) {
 			// Ignore "voluntary_ctxt_switches:" and whitespace
-			p = line + 25;
-			while(isspace(*p)) ++p;
+			text = line + 25;
+			while(isspace(*text)) ++text;
 
-			printf("voluntary_ctxt_switches: %s", p);
+			printf("voluntary_ctxt_switches: %s", text);
 		}
 		
 		if(strncmp(line, "nonvoluntary_ctxt_switches:", 27) == 0) {
 			// Ignore "nonvoluntary_ctxt_switches:" and whitespace
-			p = line + 28;
-			while(isspace(*p)) ++p;
+			text = line + 28;
+			while(isspace(*text)) ++text;
 
-			printf("voluntary_ctxt_switches: %s", p);
+			printf("nonvoluntary_ctxt_switches: %s", text);
 		}
   }
 
-  fclose(statusf);
+  fclose(status_file);
 }
 
 void update_bg_procss() {
@@ -348,20 +341,26 @@ void update_bg_procss() {
   while(1) {
 		id = waitpid(-1, &status, WNOHANG | WUNTRACED | WCONTINUED);
 		if (id > 0) {
-			if (WIFSIGNALED(status) || WIFEXITED(status)) {
+			if (WIFEXITED(status)) {
+				printf("Process %d has terminated.\n", id);
+				process_list = delete_item (process_list, id);
+			}
+			if (WIFSIGNALED(status)) {
+				printf("Process %d was killed.\n", id);
 		  	process_list = delete_item (process_list, id);
 		  }
 		  if (WIFSTOPPED(status)) {
+				printf("Process %d was stopped.\n", id);
 		  	update_isStop(process_list, id, 1);
 		  }
 		  if (WIFCONTINUED(status)) {
+				printf("Process %d restarted.\n", id);
 		  	update_isStop(process_list, id, 0);
 			}
 		} else {
 			break;
 		}
   }
-  return;
 }
 
 
