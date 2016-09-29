@@ -15,17 +15,20 @@ void find_and_print_process_info(pid_t target_pid) {
 	char path[MAX_PATH_LEN], line[MAX_LINE_LEN], *text;
   FILE* status_file;
 
-  snprintf(path, MAX_PATH_LEN, "/proc/%d/status", (int) target_pid);
+  snprintf(path, MAX_PATH_LEN, "/proc/%d/status", (int) target_pid); // setup path to file
 
-  status_file = fopen(path, "r");
-  if(!status_file) {
+  status_file = fopen(path, "r"); // read file
+
+  if(!status_file) { // error handling
 		perror("Could not open status file.\n");
 		return;
 	}
 
  	printf("PID: %d\n", (int) target_pid);
 
-  while(fgets(line, MAX_LINE_LEN, status_file)) {
+  while(fgets(line, MAX_LINE_LEN, status_file)) { // read line by line
+
+		// get name info 
   	if(strncmp(line, "Name:", 5) == 0) {
 			// Ignore "Name:" and whitespace
 			text = line + 6;
@@ -34,6 +37,7 @@ void find_and_print_process_info(pid_t target_pid) {
 			printf("comm: %s", text);
 		}
 
+		// get state info
 		if(strncmp(line, "State:", 6) == 0) {
 			// Ignore "State:" and whitespace
 			text = line + 7;
@@ -42,6 +46,7 @@ void find_and_print_process_info(pid_t target_pid) {
 			printf("state: %s", text);
 		}
 		
+		// get rss info
 		if(strncmp(line, "VmRSS:", 6) == 0) {
 			// Ignore "VmRSS:" and whitespace
 			text = line + 7;
@@ -50,6 +55,7 @@ void find_and_print_process_info(pid_t target_pid) {
 			printf("rss: %s", text);
 		}
 		
+		// get voluntary cxtx switches info
 		if(strncmp(line, "voluntary_ctxt_switches:", 24) == 0) {
 			// Ignore "voluntary_ctxt_switches:" and whitespace
 			text = line + 25;
@@ -58,6 +64,7 @@ void find_and_print_process_info(pid_t target_pid) {
 			printf("voluntary_ctxt_switches: %s", text);
 		}
 		
+		// get nonvoluntary cxtx switches info
 		if(strncmp(line, "nonvoluntary_ctxt_switches:", 27) == 0) {
 			// Ignore "nonvoluntary_ctxt_switches:" and whitespace
 			text = line + 28;
@@ -69,3 +76,4 @@ void find_and_print_process_info(pid_t target_pid) {
 
   fclose(status_file);
 }
+
